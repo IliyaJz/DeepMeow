@@ -1,0 +1,53 @@
+# ─────────────────────────────────────────────────────────────────
+# DeepMeow — Default Configuration
+# All numbers that control the model and training live here.
+# Change these instead of touching the Python code directly.
+# ─────────────────────────────────────────────────────────────────
+
+# ─── Data ─────────────────────────────────────────────────────────
+data:
+  train_ann: "data/annotations/train.json"  # Path to COCO-format training annotations
+  val_ann:   "data/annotations/val.json"    # Path to COCO-format validation annotations
+  image_dir: "data/raw"                     # Folder where images are stored
+
+# ─── Model ────────────────────────────────────────────────────────
+model:
+  num_classes: 1          # We only detect one class: cat
+  input_size: 416         # Every image will be resized to 416 x 416 pixels
+                          # 416 is divisible by 32, which the backbone requires
+
+# ─── Anchors ──────────────────────────────────────────────────────
+# Anchors are pre-defined box shapes the model uses as references.
+# Each scale (small/medium/large objects) gets 3 anchor sizes.
+# Units are in pixels at the 416×416 input resolution.
+anchors:
+  small:  [[10,13],  [16,30],   [33,23]]    # For small cats (P3, 52×52 grid)
+  medium: [[30,61],  [62,45],   [59,119]]   # For medium cats (P4, 26×26 grid)
+  large:  [[116,90], [156,198], [373,326]]  # For large/close-up cats (P5, 13×13 grid)
+
+# ─── Training ─────────────────────────────────────────────────────
+training:
+  epochs: 200             # Total number of passes through the dataset
+  batch_size: 16          # Number of images processed together per step
+  num_workers: 4          # How many CPU threads to use for loading data
+  learning_rate: 0.001    # How big a step the optimizer takes each update
+  weight_decay: 0.0005    # L2 regularization to prevent overfitting
+  warmup_epochs: 3        # Gradually increase LR for the first 3 epochs
+
+# ─── Loss Weights ─────────────────────────────────────────────────
+# We have 3 parts to our loss. These weights control how much each matters.
+loss:
+  lambda_box: 5.0   # Penalty for wrong bounding box position/size (high weight)
+  lambda_obj: 1.0   # Penalty for wrongly predicting "is something here?"
+  lambda_cls: 0.5   # Penalty for wrong class prediction (low: only 1 class)
+
+# ─── Evaluation ───────────────────────────────────────────────────
+eval:
+  conf_threshold: 0.25    # Minimum confidence score to keep a detection
+  iou_threshold:  0.45    # NMS threshold: remove boxes that overlap more than this
+
+# ─── Paths ────────────────────────────────────────────────────────
+paths:
+  checkpoint_dir: "checkpoints"    # Where to save model snapshots
+  results_dir:    "results"        # Where to save evaluation outputs
+  best_model:     "checkpoints/best.pth"

@@ -1,0 +1,22 @@
+# ─── Core Deep Learning ───────────────────────────────────────────
+torch>=2.1.0          # PyTorch — we build everything on top of this
+torchvision>=0.16.0   # Useful utilities (transforms, pretrained weights later)
+
+# ─── Data & Annotations ───────────────────────────────────────────
+pycocotools>=2.0.7    # Reads COCO-format JSON annotation files
+Pillow>=10.0.0        # Opens and manipulates images (PIL)
+
+# ─── Data Augmentation ────────────────────────────────────────────
+albumentations>=1.4.0 # Rich image augmentation library that also transforms bounding boxes
+
+# ─── Video & Visualization ────────────────────────────────────────
+opencv-python>=4.9.0  # Reading/writing video frames and drawing boxes
+matplotlib>=3.8.0     # Plotting loss curves, visualizing images
+
+# ─── Scientific Computing ─────────────────────────────────────────
+numpy>=1.26.0         # Tensor math, array operations
+scipy>=1.12.0         # Hungarian algorithm for tracking (Week 5)
+
+# ─── Utilities ────────────────────────────────────────────────────
+tqdm>=4.66.0          # Progress bars for training loops
+pyyaml>=6.0.1         # Read our YAML config files
