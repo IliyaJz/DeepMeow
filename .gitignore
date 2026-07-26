@@ -1,0 +1,30 @@
+# Python / Virtual Environment
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv/
+
+# Data & Models (Do not commit large datasets or heavy checkpoints)
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+data/annotations/*
+!data/annotations/.gitkeep
+checkpoints/*
+!checkpoints/.gitkeep
+results/*
+!results/.gitkeep
+
+# IDE / OS
+.DS_Store
+.vscode/
+.idea/
+
+# Jupyter Notebook Checkpoints
+.ipynb_checkpoints/
