@@ -38,13 +38,19 @@ MAX_VAL_IMAGES     = 500
 def _get_data_root() -> Path:
     """
     Return the root data directory.
-    - If running in Colab with Drive mounted: use Drive path (data persists!)
-    - Otherwise: use local 'data/' folder relative to the repo root
+    - If SAVE_TO_DRIVE is True and Google Drive is mounted (/content/drive/MyDrive):
+      create and return the Google Drive data folder.
+    - Otherwise: use local 'data/' folder relative to the repo root.
     """
-    if SAVE_TO_DRIVE and DRIVE_PATH.parent.exists():
+    drive_mount = Path("/content/drive/MyDrive")
+    if SAVE_TO_DRIVE and drive_mount.exists():
+        DRIVE_PATH.mkdir(parents=True, exist_ok=True)
         print(f"Saving data to Google Drive: {DRIVE_PATH}")
         return DRIVE_PATH
-    return Path("data")
+    
+    local_data = Path("data")
+    local_data.mkdir(parents=True, exist_ok=True)
+    return local_data
 
 
 def download_file(url: str, dest_path: Path):
@@ -184,6 +190,7 @@ def main():
     print("=" * 55)
     print(" DeepMeow Dataset Downloader")
     print("=" * 55)
+    print(f" Target folder: {data_root.resolve()}")
 
     # ── Step 1: Download COCO annotation ZIP ──────────────────────
     zip_path = tmp_dir / "annotations_trainval2017.zip"
