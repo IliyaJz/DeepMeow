@@ -1,78 +1,100 @@
-# DeepMeow: Custom Cat Detection & Tracking from Scratch
+# DeepMeow: Real-Time Cat Detection & Multi-Object Tracking
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/IliyaJz/DeepMeow/blob/main/notebooks/DeepMeow_Colab.ipynb)
 
-**DeepMeow** is a computer vision research project built in PyTorch to detect and track cats in video streams using custom deep learning models built from scratch.
+A research-focused computer vision implementation in PyTorch. The goal of this project is to build a single-shot object detector and multi-object tracker from first principles (without relying on high-level prebuilt frameworks like `ultralytics/yolov8`), making every component fully interpretable and extensible.
 
 ---
 
-## Quick Start (Google Colab — Recommended)
+## Project Motivation & Scope
 
-Click the **"Open in Colab"** badge above. The notebook will:
-1. Clone this repository into Colab
-2. Install all dependencies
-3. Download the COCO cat dataset (~500 MB, takes ~1 min on Colab)
-4. Verify the backbone forward pass
+While off-the-shelf detection APIs exist, building a multi-scale object detector from scratch provides deep insights into:
+- Feature extraction dynamics across receptive fields
+- Anchor-based target encoding and multi-task loss design (CIoU + Focal Loss)
+- Motion estimation via Kalman filtering and state association via the Hungarian algorithm
 
-> **No local setup needed.** Free GPU access included.
-
----
-
-## Project Overview
-
-This repository contains:
-- **Custom Backbone & FPN**: ResNet-inspired feature extractor + Feature Pyramid Network for multi-scale visual features.
-- **Single-Shot Detector**: Custom anchor-based detection head with CIoU loss and Non-Maximum Suppression (NMS).
-- **Multi-Object Tracker**: Implementation of SORT (Kalman Filter + Hungarian Algorithm) and DeepSORT with appearance feature embeddings.
-- **Dataset Pipeline**: Data collection from COCO 2017, annotation parsing, and spatial/color augmentations (Mosaic, Mixup).
+We focus on single-class detection and tracking ("cat") using annotated images from the COCO 2017 dataset for training and custom video feeds for tracking evaluation.
 
 ---
 
 ## Repository Structure
 
+Here is how the codebase is organized so you can easily follow along with the modular pipeline:
+
 ```
 DeepMeow/
 ├── notebooks/
-│   └── DeepMeow_Colab.ipynb   # <- Start here on Google Colab
-├── data/                      # Datasets (downloaded at runtime, not in git)
+│   └── DeepMeow_Colab.ipynb   # Interactive execution notebook (GPU recommended)
+├── data/                      # Dataset root (git-ignored, generated at runtime)
+│   ├── raw/                   # COCO cat images (train/val splits)
+│   └── annotations/           # Filtered COCO JSON annotations
 ├── src/
 │   ├── data/
-│   │   ├── downloader.py      # Downloads COCO cat images & annotations
-│   │   ├── dataset.py         # PyTorch Dataset class
-│   │   └── augmentations.py   # Image + bounding box augmentations
+│   │   ├── downloader.py      # Automated COCO filtering & streaming downloader
+│   │   ├── dataset.py         # PyTorch Dataset implementation
+│   │   └── augmentations.py   # Albumentations pipeline (Spatial + BBox transforms)
 │   ├── models/
-│   │   ├── backbone.py        # Custom CNN (ConvBlock + ResidualBlock + FPN outputs)
-│   │   ├── neck.py            # Feature Pyramid Network (Week 2)
-│   │   ├── head.py            # Detection head (Week 2)
-│   │   └── detector.py        # Full model assembly (Week 2)
-│   ├── tracking/              # SORT & DeepSORT (Week 5)
-│   ├── losses/                # CIoU + Focal loss (Week 2)
-│   └── utils/                 # IoU, NMS, mAP metrics
+│   │   ├── backbone.py        # Custom ResNet-style CNN feature extractor (P3, P4, P5)
+│   │   ├── neck.py            # Feature Pyramid Network (FPN) for multi-scale fusion
+│   │   ├── head.py            # Anchor-based detection head
+│   │   └── detector.py        # Complete end-to-end detector module
+│   ├── tracking/              # SORT & DeepSORT tracking algorithms
+│   ├── losses/                # Bounding box regression (CIoU) & Focal Loss modules
+│   └── utils/                 # Bounding box operations (IoU, NMS) & mAP metrics
 ├── configs/
-│   └── default.yaml           # All hyperparameters
-└── requirements.txt
+│   └── default.yaml           # Central hyperparameter configuration
+└── requirements.txt           # Environment dependencies
 ```
 
 ---
 
-## 6-Week Roadmap
+## 6-Week Development Roadmap
 
-| Week | Focus | Status |
-|------|-------|--------|
-| **1** | Data Pipeline & Custom CNN Backbone | Done |
-| **2** | FPN Neck, Detection Head & Loss Functions | In Progress |
-| **3** | Full Training Pipeline & Augmentations | Upcoming |
-| **4** | Hyperparameter Optimization & Full Training | Upcoming |
-| **5** | SORT & DeepSORT Multi-Object Tracking | Upcoming |
-| **6** | Inference Optimization & Portfolio Polish | Upcoming |
+We are following a 6-week research build schedule:
+
+- [x] **Week 1: Data Pipeline & Custom CNN Backbone**
+  - Configured project directory structure & YAML hyperparameter definitions
+  - Implemented automated dataset downloader filtering COCO 2017 for cat annotations
+  - Built custom PyTorch `Dataset` & Albumentations bbox transform wrapper
+  - Built ResNet-style CNN backbone producing multi-scale feature maps ($P_3, P_4, P_5$)
+
+- [ ] **Week 2: Feature Pyramid Network (FPN), Detection Head & Loss Functions**
+  - Constructing FPN top-down pathway and lateral connections
+  - Designing anchor-based detection head and regression targets
+  - Implementing CIoU bounding box loss and Focal Loss for objectness
+
+- [ ] **Week 3: Training Pipeline & Advanced Augmentation**
+  - Setting up AdamW optimizer with warmup + Cosine Annealing learning rate schedule
+  - Integrating Mosaic & Mixup data augmentations
+  - Implementing COCO-style mAP evaluation metric
+
+- [ ] **Week 4: Optimization, Hyperparameter Tuning & Full Training**
+  - Running k-means anchor clustering on dataset ground-truth boxes
+  - Implementing Exponential Moving Average (EMA) model weights
+  - Completing full-scale training runs (200+ epochs)
+
+- [ ] **Week 5: Multi-Object Tracking Engine (SORT / DeepSORT)**
+  - Implementing 8D linear Kalman Filter for bounding box trajectory state estimation
+  - Implementing Hungarian algorithm assignment matrix solving
+  - Integrating appearance embeddings for occlusion handling
+
+- [ ] **Week 6: Inference Pipeline, Profiling & Portfolio Documentation**
+  - Building real-time video processing pipeline with visual track histories
+  - Benchmarking FPS performance and memory footprint
+  - Writing final technical project report and ablation summary
 
 ---
 
-## Team Workflow
+## Running the Pipeline (Google Colab)
 
-Each team member can work on Colab independently using the same shared codebase:
+To replicate our experiments without setting up a local GPU environment:
+
+1. Click the **Open in Colab** badge at the top of this page.
+2. Ensure GPU acceleration is enabled (`Runtime -> Change runtime type -> T4 GPU`).
+3. Execute the cells in [`notebooks/DeepMeow_Colab.ipynb`](file:///Users/macbook/Codes/Antigravity/Cat%20Detector/notebooks/DeepMeow_Colab.ipynb) sequentially.
+
+If you prefer running locally:
 ```bash
-# In your Colab notebook or terminal:
 git clone https://github.com/IliyaJz/DeepMeow.git
 cd DeepMeow
 pip install -r requirements.txt
