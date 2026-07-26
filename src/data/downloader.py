@@ -11,11 +11,6 @@ Run from the repo root:
 
 On Google Colab:
     !python src/data/downloader.py
-    
-    Optional: mount Google Drive first so data persists across sessions:
-    from google.colab import drive
-    drive.mount('/content/drive')
-    Then set SAVE_TO_DRIVE = True below.
 """
 
 import os
@@ -30,7 +25,7 @@ from tqdm import tqdm
 # ─── Colab / Drive Configuration ──────────────────────────────────
 # Set SAVE_TO_DRIVE = True if you mounted Google Drive in Colab
 # and want data to persist between sessions (recommended for teams).
-SAVE_TO_DRIVE = False
+SAVE_TO_DRIVE = True
 DRIVE_PATH    = Path("/content/drive/MyDrive/DeepMeow/data")
 
 # ─── Dataset Configuration ────────────────────────────────────────
@@ -47,17 +42,16 @@ def _get_data_root() -> Path:
     - Otherwise: use local 'data/' folder relative to the repo root
     """
     if SAVE_TO_DRIVE and DRIVE_PATH.parent.exists():
-        print(f"💾 Saving data to Google Drive: {DRIVE_PATH}")
+        print(f"Saving data to Google Drive: {DRIVE_PATH}")
         return DRIVE_PATH
     return Path("data")
 
 
 def download_file(url: str, dest_path: Path):
     """Download a file from a URL, showing a tqdm progress bar."""
-    print(f"\n⬇️  Downloading: {url.split('/')[-1]}")
+    print(f"\nDownloading: {url.split('/')[-1]}")
     dest_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # urllib doesn't give byte-level progress, so we do a streaming download
     response = urllib.request.urlopen(url)
     total    = int(response.headers.get("Content-Length", 0))
     
@@ -75,7 +69,7 @@ def download_file(url: str, dest_path: Path):
             bar.update(len(chunk))
             downloaded += len(chunk)
 
-    print(f"  ✓ Saved to {dest_path}")
+    print(f"  Saved to {dest_path}")
 
 
 def filter_coco_for_cats(coco_ann_file: Path, split: str, max_images: int):
@@ -93,7 +87,7 @@ def filter_coco_for_cats(coco_ann_file: Path, split: str, max_images: int):
     bbox format in COCO: [x_min, y_min, width, height]
     We keep it as-is here; dataset.py converts to [x1, y1, x2, y2].
     """
-    print(f"\n🔍 Filtering COCO '{split}' annotations for cats...")
+    print(f"\nFiltering COCO '{split}' annotations for cats...")
     
     with open(coco_ann_file, "r") as f:
         coco = json.load(f)
@@ -119,7 +113,7 @@ def filter_coco_for_cats(coco_ann_file: Path, split: str, max_images: int):
         and ann["category_id"] == COCO_CAT_ID
     ]
 
-    # Step 4: Re-map category_id from 17 → 1 (we only have 1 class now)
+    # Step 4: Re-map category_id from 17 -> 1 (we only have 1 class now)
     for ann in filtered_anns:
         ann["category_id"] = 1
 
@@ -130,7 +124,7 @@ def filter_coco_for_cats(coco_ann_file: Path, split: str, max_images: int):
         "categories":  [{"id": 1, "name": "cat"}],
     }
 
-    print(f"  ✓ {len(filtered_images)} images, {len(filtered_anns)} annotations")
+    print(f"  {len(filtered_images)} images, {len(filtered_anns)} annotations")
     return result, filtered_images
 
 
@@ -144,7 +138,7 @@ def download_images(images: list, split: str, raw_dir: Path):
 
     base_url = f"http://images.cocodataset.org/{split}2017/"
     
-    print(f"\n📥 Downloading {len(images)} {split} images...")
+    print(f"\nDownloading {len(images)} {split} images...")
     failed  = []
     skipped = 0
 
@@ -162,11 +156,11 @@ def download_images(images: list, split: str, raw_dir: Path):
             failed.append(img_info["file_name"])
 
     if skipped > 0:
-        print(f"  ⏭️  Skipped {skipped} already-downloaded images.")
+        print(f"  Skipped {skipped} already-downloaded images.")
     if failed:
-        print(f"  ⚠️  {len(failed)} images failed. They will be missing from training.")
+        print(f"  WARNING: {len(failed)} images failed. They will be missing from training.")
     
-    print(f"  ✓ Images saved to: {split_dir}")
+    print(f"  Images saved to: {split_dir}")
 
 
 def main():
@@ -196,15 +190,15 @@ def main():
     if not zip_path.exists():
         download_file(COCO_TRAIN_ANN_URL, zip_path)
     else:
-        print(f"\n✓ Annotation ZIP already exists, skipping download.")
+        print(f"\nAnnotation ZIP already exists, skipping download.")
 
     # ── Step 2: Extract ZIP ────────────────────────────────────────
     extract_dir = tmp_dir / "extracted"
     if not extract_dir.exists():
-        print("\n📦 Extracting annotations ZIP...")
+        print("\nExtracting annotations ZIP...")
         with zipfile.ZipFile(zip_path, "r") as z:
             z.extractall(extract_dir)
-        print("  ✓ Extracted.")
+        print("  Extracted.")
     
     coco_ann_base = extract_dir / "annotations"
 
@@ -213,7 +207,7 @@ def main():
         ann_out = ann_dir / f"{split}.json"
         
         if ann_out.exists():
-            print(f"\n✓ {split}.json already exists, skipping filter step.")
+            print(f"\n{split}.json already exists, skipping filter step.")
             # Still need image list for downloading
             with open(ann_out) as f:
                 images = json.load(f)["images"]
@@ -223,19 +217,19 @@ def main():
             
             with open(ann_out, "w") as f:
                 json.dump(result, f)
-            print(f"  ✓ Saved → {ann_out}")
+            print(f"  Saved -> {ann_out}")
 
         # ── Step 4: Download images ────────────────────────────────
         download_images(images, split, raw_dir)
 
     # ── Step 5: Clean up temp files ───────────────────────────────
-    print("\n🧹 Cleaning up temporary files...")
+    print("\nCleaning up temporary files...")
     shutil.rmtree(tmp_dir)
-    print("  ✓ Done!")
+    print("  Done!")
 
     # ── Summary ───────────────────────────────────────────────────
     print("\n" + "=" * 55)
-    print(" ✅ Dataset ready!")
+    print(" Dataset ready!")
     print(f"    Train images : {raw_dir}/train/")
     print(f"    Val images   : {raw_dir}/val/")
     print(f"    Annotations  : {ann_dir}/train.json & val.json")

@@ -1,4 +1,4 @@
-# 🐱 DeepMeow: Custom Cat Detection & Tracking from Scratch
+# DeepMeow: Custom Cat Detection & Tracking from Scratch
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/IliyaJz/DeepMeow/blob/main/notebooks/DeepMeow_Colab.ipynb)
 
@@ -6,7 +6,7 @@
 
 ---
 
-## 🚀 Quick Start (Google Colab — Recommended)
+## Quick Start (Google Colab — Recommended)
 
 Click the **"Open in Colab"** badge above. The notebook will:
 1. Clone this repository into Colab
@@ -18,7 +18,7 @@ Click the **"Open in Colab"** badge above. The notebook will:
 
 ---
 
-## 🎯 Project Overview
+## Project Overview
 
 This repository contains:
 - **Custom Backbone & FPN**: ResNet-inspired feature extractor + Feature Pyramid Network for multi-scale visual features.
@@ -28,12 +28,12 @@ This repository contains:
 
 ---
 
-## 📁 Repository Structure
+## Repository Structure
 
 ```
 DeepMeow/
 ├── notebooks/
-│   └── DeepMeow_Colab.ipynb   # ← Start here on Google Colab
+│   └── DeepMeow_Colab.ipynb   # <- Start here on Google Colab
 ├── data/                      # Datasets (downloaded at runtime, not in git)
 ├── src/
 │   ├── data/
@@ -55,20 +55,20 @@ DeepMeow/
 
 ---
 
-## 🗺️ 6-Week Roadmap
+## 6-Week Roadmap
 
 | Week | Focus | Status |
 |------|-------|--------|
-| **1** | Data Pipeline & Custom CNN Backbone | ✅ Done |
-| **2** | FPN Neck, Detection Head & Loss Functions | 🔄 In Progress |
-| **3** | Full Training Pipeline & Augmentations | ⏳ Upcoming |
-| **4** | Hyperparameter Optimization & Full Training | ⏳ Upcoming |
-| **5** | SORT & DeepSORT Multi-Object Tracking | ⏳ Upcoming |
-| **6** | Inference Optimization & Portfolio Polish | ⏳ Upcoming |
+| **1** | Data Pipeline & Custom CNN Backbone | Done |
+| **2** | FPN Neck, Detection Head & Loss Functions | In Progress |
+| **3** | Full Training Pipeline & Augmentations | Upcoming |
+| **4** | Hyperparameter Optimization & Full Training | Upcoming |
+| **5** | SORT & DeepSORT Multi-Object Tracking | Upcoming |
+| **6** | Inference Optimization & Portfolio Polish | Upcoming |
 
 ---
 
-## 👥 Team Workflow
+## Team Workflow
 
 Each team member can work on Colab independently using the same shared codebase:
 ```bash
