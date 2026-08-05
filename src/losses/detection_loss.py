@@ -185,9 +185,9 @@ class DetectionLoss(nn.Module):
         )  # [H*W*3, 4]
 
         # Flatten predictions: [B, H*W*num_anchors, 6]
-        # .reshape() is used instead of .view() because the tensor may be non-contiguous
-        # after the permute() call inside the detection head
-        preds_flat = predictions.reshape(batch_size, -1, 4 + 1 + self.num_classes)
+        # The head guarantees contiguous memory (via .contiguous() after permute),
+        # so .view() is safe here
+        preds_flat = predictions.view(batch_size, -1, 4 + 1 + self.num_classes)
 
         total_box = torch.tensor(0.0, device=device)
         total_obj = torch.tensor(0.0, device=device)

@@ -107,7 +107,9 @@ class DetectionHead(nn.Module):
 
         # Reshape to [B, H, W, num_anchors, pred_per_anchor]
         # This layout makes it easy to access per-anchor predictions
-        x = x.permute(0, 2, 3, 1)                  # [B, H, W, num_anchors * pred_per_anchor]
+        # .contiguous() is required after permute() to ensure the tensor's memory
+        # layout is sequential — otherwise .view() will raise a RuntimeError
+        x = x.permute(0, 2, 3, 1).contiguous()     # [B, H, W, num_anchors * pred_per_anchor]
         x = x.view(batch_size, H, W,
                    self.num_anchors, self.pred_per_anchor)  # [B, H, W, 3, 6]
 
