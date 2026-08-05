@@ -185,9 +185,11 @@ class DetectionLoss(nn.Module):
         )  # [H*W*3, 4]
 
         # Flatten predictions: [B, H*W*num_anchors, 6]
-        # The head guarantees contiguous memory (via .contiguous() after permute),
-        # so .view() is safe here
-        preds_flat = predictions.view(batch_size, -1, 4 + 1 + self.num_classes)
+        # .contiguous() is called here as a defensive measure — permute() inside the
+        # head reorders dimensions without moving data in memory, which can cause
+        # .view() to fail. Calling .contiguous() forces a memory copy into
+        # a standard row-major layout before we reshape.
+        preds_flat = predictions.contiguous().view(batch_size, -1, 4 + 1 + self.num_classes)
 
         total_box = torch.tensor(0.0, device=device)
         total_obj = torch.tensor(0.0, device=device)
