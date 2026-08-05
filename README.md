@@ -35,12 +35,14 @@ DeepMeow/
 │   │   └── augmentations.py   # Albumentations pipeline (Spatial + BBox transforms)
 │   ├── models/
 │   │   ├── backbone.py        # Custom ResNet-style CNN feature extractor (P3, P4, P5)
-│   │   ├── neck.py            # Feature Pyramid Network (FPN) for multi-scale fusion
-│   │   ├── head.py            # Anchor-based detection head
-│   │   └── detector.py        # Complete end-to-end detector module
-│   ├── tracking/              # SORT & DeepSORT tracking algorithms
-│   ├── losses/                # Bounding box regression (CIoU) & Focal Loss modules
-│   └── utils/                 # Bounding box operations (IoU, NMS) & mAP metrics
+│   │   ├── neck.py            # Feature Pyramid Network (FPN) — top-down feature fusion
+│   │   ├── head.py            # Multi-scale anchor-based detection head
+│   │   └── detector.py        # End-to-end detector (Backbone -> FPN -> Head)
+│   ├── losses/
+│   │   └── detection_loss.py  # CIoU box loss + Focal objectness + BCE classification
+│   ├── utils/
+│   │   └── boxes.py           # IoU, CIoU, NMS, anchor generation, box encode/decode
+│   └── tracking/              # SORT & DeepSORT tracking (Week 5)
 ├── configs/
 │   └── default.yaml           # Central hyperparameter configuration
 └── requirements.txt           # Environment dependencies
@@ -54,14 +56,16 @@ We are following a 6-week research build schedule:
 
 - [x] **Week 1: Data Pipeline & Custom CNN Backbone**
   - Configured project directory structure & YAML hyperparameter definitions
-  - Implemented automated dataset downloader filtering COCO 2017 for cat annotations
+  - Implemented automated dataset downloader filtering COCO 2017 for cat annotations (~3,000 train / ~500 val images)
   - Built custom PyTorch `Dataset` & Albumentations bbox transform wrapper
-  - Built ResNet-style CNN backbone producing multi-scale feature maps ($P_3, P_4, P_5$)
+  - Built ResNet-style CNN backbone producing multi-scale feature maps ($P_3$, $P_4$, $P_5$) — ~40.5M parameters
 
-- [ ] **Week 2: Feature Pyramid Network (FPN), Detection Head & Loss Functions**
-  - Constructing FPN top-down pathway and lateral connections
-  - Designing anchor-based detection head and regression targets
-  - Implementing CIoU bounding box loss and Focal Loss for objectness
+- [x] **Week 2: Feature Pyramid Network (FPN), Detection Head & Loss Functions**
+  - Implemented FPN top-down pathway with lateral connections, fusing backbone maps into uniform 256-channel outputs
+  - Designed anchor-based `MultiScaleHead` producing 6 values per anchor (4 offsets + objectness + class)
+  - Implemented anchor-GT matching with IoU thresholds (positive >= 0.5, ignore 0.4–0.5, negative < 0.4)
+  - Implemented Complete IoU (CIoU) box regression loss and Focal Loss for objectness imbalance
+  - Assembled the full `DeepMeowDetector` with training and NMS-based inference modes
 
 - [ ] **Week 3: Training Pipeline & Advanced Augmentation**
   - Setting up AdamW optimizer with warmup + Cosine Annealing learning rate schedule
@@ -85,13 +89,47 @@ We are following a 6-week research build schedule:
 
 ---
 
+## Current Architecture Overview
+
+The detection pipeline flows as follows:
+
+```
+Input Image [B, 3, 416, 416]
+        |
+   [Backbone]   <- custom ResNet-style CNN
+        |
+  P3 [B, 256,  52, 52]   <- stride 8  (small objects)
+  P4 [B, 512,  26, 26]   <- stride 16 (medium objects)
+  P5 [B, 1024, 13, 13]   <- stride 32 (large objects)
+        |
+    [FPN Neck]  <- top-down lateral feature fusion
+        |
+  F3 [B, 256, 52, 52]
+  F4 [B, 256, 26, 26]
+  F5 [B, 256, 13, 13]
+        |
+ [Detection Head]  <- separate head per scale
+        |
+  pred3 [B, 52, 52, 3, 6]   <- 3 anchors, 6 values each
+  pred4 [B, 26, 26, 3, 6]
+  pred5 [B, 13, 13, 3, 6]
+        |
+  [Loss / NMS]  <- training vs inference
+```
+
+Total predictions per image: 52x52x3 + 26x26x3 + 13x13x3 = **10,647 anchors**
+
+---
+
 ## Running the Pipeline (Google Colab)
 
 To replicate our experiments without setting up a local GPU environment:
 
 1. Click the **Open in Colab** badge at the top of this page.
 2. Ensure GPU acceleration is enabled (`Runtime -> Change runtime type -> T4 GPU`).
-3. Execute the cells in [`notebooks/DeepMeow_Colab.ipynb`](file:///Users/macbook/Codes/Antigravity/Cat%20Detector/notebooks/DeepMeow_Colab.ipynb) sequentially.
+3. Execute the cells in `notebooks/DeepMeow_Colab.ipynb` sequentially.
+   - **Cells 1–8**: Week 1 (environment setup, dataset download, backbone test)
+   - **Cells 9–15**: Week 2 (FPN, head, loss, and full detector verification)
 
 If you prefer running locally:
 ```bash
