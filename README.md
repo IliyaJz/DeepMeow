@@ -67,10 +67,11 @@ We are following a 6-week research build schedule:
   - Implemented Complete IoU (CIoU) box regression loss and Focal Loss for objectness imbalance
   - Assembled the full `DeepMeowDetector` with training and NMS-based inference modes
 
-- [ ] **Week 3: Training Pipeline & Advanced Augmentation**
-  - Setting up AdamW optimizer with warmup + Cosine Annealing learning rate schedule
-  - Integrating Mosaic & Mixup data augmentations
-  - Implementing COCO-style mAP evaluation metric
+- [x] **Week 3: Training Pipeline & Advanced Augmentation**
+  - Implemented AdamW optimizer with linear warmup + Cosine Annealing LR schedule
+  - Integrated 4-image Mosaic and Mixup data augmentation strategies
+  - Implemented COCO-style mAP evaluation (mAP@50 and mAP@50:95 with 11-point interpolation)
+  - Built full training loop with gradient clipping, periodic checkpointing, and best-model saving
 
 - [ ] **Week 4: Optimization, Hyperparameter Tuning & Full Training**
   - Running k-means anchor clustering on dataset ground-truth boxes
@@ -130,6 +131,7 @@ To replicate our experiments without setting up a local GPU environment:
 3. Execute the cells in `notebooks/DeepMeow_Colab.ipynb` sequentially.
    - **Cells 1–8**: Week 1 (environment setup, dataset download, backbone test)
    - **Cells 9–15**: Week 2 (FPN, head, loss, and full detector verification)
+   - **Cells 16–22**: Week 3 (mAP evaluation, mosaic augmentation, and full training run)
 
 If you prefer running locally:
 ```bash
