@@ -45,7 +45,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.models.detector import DeepMeowDetector
 from src.data.dataset import CatDataset
-from src.data.augmentations import get_train_transform, get_val_transform
+from src.data.augmentations import build_train_transform, build_val_transform
 from src.utils.metrics import MeanAveragePrecision
 
 
@@ -270,16 +270,20 @@ def train(
     print(f"Data root  : {data_root}")
     print(f"Epochs     : {epochs}   Batch size: {batch_size}   LR: {lr}")
 
-    # ── Build Datasets & DataLoaders ─────────────────────────────
+    # CatDataset expects:
+    #   ann_file  = path to the COCO-format JSON annotation file
+    #   image_dir = path to the folder containing raw/ train/ val/ images
+    #   transform = an AlbumentationsWrapper callable
+    data_path = Path(data_root)
     train_dataset = CatDataset(
-        data_root=data_root,
-        split="train",
-        transforms=get_train_transform(input_size=416),
+        ann_file  = str(data_path / "annotations" / "train.json"),
+        image_dir = str(data_path / "raw"),
+        transform = build_train_transform(input_size=416),
     )
     val_dataset = CatDataset(
-        data_root=data_root,
-        split="val",
-        transforms=get_val_transform(input_size=416),
+        ann_file  = str(data_path / "annotations" / "val.json"),
+        image_dir = str(data_path / "raw"),
+        transform = build_val_transform(input_size=416),
     )
 
     train_loader = DataLoader(
