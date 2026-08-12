@@ -137,8 +137,9 @@ def train_one_epoch(model, optimizer, loader, device, epoch, max_grad_norm=10.0)
 
     for batch_idx, (images, targets) in enumerate(loader):
         images = images.to(device)
-        # Move targets to device
-        targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
+        # Move targets to device — skip non-tensor fields like image_id (int)
+        targets = [{k: v.to(device) if isinstance(v, torch.Tensor) else v
+                    for k, v in t.items()} for t in targets]
 
         # ── Forward pass ─────────────────────────────────────────
         loss, loss_dict = model(images, targets)
