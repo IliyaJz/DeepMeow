@@ -45,7 +45,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.models.detector import DeepMeowDetector
 from src.data.dataset import CatDataset
-from src.data.augmentations import get_train_transforms, get_val_transforms
+from src.data.augmentations import get_train_transform, get_val_transform
 from src.utils.metrics import MeanAveragePrecision
 
 
@@ -274,12 +274,12 @@ def train(
     train_dataset = CatDataset(
         data_root=data_root,
         split="train",
-        transforms=get_train_transforms(input_size=416),
+        transforms=get_train_transform(input_size=416),
     )
     val_dataset = CatDataset(
         data_root=data_root,
         split="val",
-        transforms=get_val_transforms(input_size=416),
+        transforms=get_val_transform(input_size=416),
     )
 
     train_loader = DataLoader(
