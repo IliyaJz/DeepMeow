@@ -233,8 +233,11 @@ def load_checkpoint(path: Path, model, optimizer, scheduler):
     model.load_state_dict(ckpt["model_state"])
     optimizer.load_state_dict(ckpt["optim_state"])
     scheduler.load_state_dict(ckpt["sched_state"])
-    print(f"  Resumed from epoch {ckpt['epoch']} (mAP@50 was {ckpt['metrics'].get('mAP_50', 0):.4f})")
-    return ckpt["epoch"]
+    prev_map = ckpt.get("metrics", {}).get("mAP_50", 0.0)
+    if prev_map is None:
+        prev_map = 0.0
+    print(f"  Resumed from epoch {ckpt['epoch']} (previous best mAP@50: {prev_map:.4f})")
+    return ckpt["epoch"], float(prev_map)
 
 
 # ─── Main Training Function ───────────────────────────────────────
@@ -329,15 +332,29 @@ def train(
 
     # ── Resume from checkpoint (optional) ────────────────────────
     start_epoch = 0
+    best_map    = 0.0
+
     if resume:
-        start_epoch = load_checkpoint(Path(resume), model, optimizer, scheduler)
+        resume_path = None
+        if resume == "auto":
+            # Look for latest.pt or best.pt in save_dir
+            if (save_dir / "latest.pt").exists():
+                resume_path = save_dir / "latest.pt"
+            elif (save_dir / "best.pt").exists():
+                resume_path = save_dir / "best.pt"
+        elif Path(resume).exists():
+            resume_path = Path(resume)
+
+        if resume_path and resume_path.exists():
+            start_epoch, best_map = load_checkpoint(resume_path, model, optimizer, scheduler)
+        else:
+            print(f"  Checkpoint not found at '{resume}', starting from epoch 1.")
 
     # ── Training Loop ─────────────────────────────────────────────
-    best_map = 0.0
-    history  = {"train_loss": [], "val_map50": [], "lr": []}
+    history = {"train_loss": [], "val_map50": [], "lr": []}
 
     print("\n" + "=" * 60)
-    print("Starting training...")
+    print(f"Starting training (Epoch {start_epoch + 1} to {epochs})...")
     print("=" * 60)
 
     for epoch in range(start_epoch, epochs):
@@ -364,6 +381,10 @@ def train(
         history["train_loss"].append(train_losses["total"])
         history["val_map50"].append(val_metrics["mAP_50"])
         history["lr"].append(current_lr)
+
+        # ── Save latest checkpoint every epoch ───────────────────
+        save_checkpoint(model, optimizer, scheduler, epoch + 1, val_metrics,
+                        save_dir / "latest.pt")
 
         # ── Save periodic checkpoint every 10 epochs ─────────────
         if (epoch + 1) % 10 == 0:
