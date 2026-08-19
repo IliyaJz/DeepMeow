@@ -32,7 +32,8 @@ DeepMeow/
 │   ├── data/
 │   │   ├── downloader.py      # Automated COCO filtering & streaming downloader
 │   │   ├── dataset.py         # PyTorch Dataset implementation
-│   │   └── augmentations.py   # Albumentations pipeline (Spatial + BBox transforms)
+│   │   ├── augmentations.py   # Albumentations pipeline (Spatial + BBox transforms)
+│   │   └── mosaic.py          # 4-image Mosaic and Mixup data augmentation
 │   ├── models/
 │   │   ├── backbone.py        # Custom ResNet-style CNN feature extractor (P3, P4, P5)
 │   │   ├── neck.py            # Feature Pyramid Network (FPN) — top-down feature fusion
@@ -41,7 +42,10 @@ DeepMeow/
 │   ├── losses/
 │   │   └── detection_loss.py  # CIoU box loss + Focal objectness + BCE classification
 │   ├── utils/
-│   │   └── boxes.py           # IoU, CIoU, NMS, anchor generation, box encode/decode
+│   │   ├── boxes.py           # IoU, CIoU, NMS, anchor generation, box encode/decode
+│   │   ├── metrics.py         # COCO-style mAP evaluation (mAP@50 & mAP@50:95)
+│   │   ├── ema.py             # ModelEMA (Exponential Moving Average) weight smoothing
+│   │   └── kmeans_anchors.py  # 1-IoU K-Means anchor clustering for custom datasets
 │   └── tracking/              # SORT & DeepSORT tracking (Week 5)
 ├── configs/
 │   └── default.yaml           # Central hyperparameter configuration
@@ -73,10 +77,11 @@ We are following a 6-week research build schedule:
   - Implemented COCO-style mAP evaluation (mAP@50 and mAP@50:95 with 11-point interpolation)
   - Built full training loop with gradient clipping, periodic checkpointing, and best-model saving
 
-- [ ] **Week 4: Optimization, Hyperparameter Tuning & Full Training**
-  - Running k-means anchor clustering on dataset ground-truth boxes
-  - Implementing Exponential Moving Average (EMA) model weights
-  - Completing full-scale training runs (200+ epochs)
+- [x] **Week 4: Optimization, Hyperparameter Tuning & Scaling Up**
+  - Implemented K-Means anchor clustering using $1 - \text{IoU}$ distance metric to compute optimal anchor sizes for cat shapes
+  - Built `ModelEMA` (Exponential Moving Average) with warm-up ramp-up decay and checkpoint state persistence
+  - Updated validation to evaluate on smoothed EMA weights for enhanced stability and mAP gains
+  - Built multi-session training workflow with LR schedule position recovery and cosine floor ($\eta_{\text{min}}$) for Google Colab
 
 - [ ] **Week 5: Multi-Object Tracking Engine (SORT / DeepSORT)**
   - Implementing 8D linear Kalman Filter for bounding box trajectory state estimation
@@ -128,10 +133,11 @@ To replicate our experiments without setting up a local GPU environment:
 
 1. Click the **Open in Colab** badge at the top of this page.
 2. Ensure GPU acceleration is enabled (`Runtime -> Change runtime type -> T4 GPU`).
-3. Execute the cells in `notebooks/DeepMeow_Colab.ipynb` sequentially.
+3. Execute the cells in `notebooks/DeepMeow_Colab.ipynb` sequentially:
    - **Cells 1–8**: Week 1 (environment setup, dataset download, backbone test)
    - **Cells 9–15**: Week 2 (FPN, head, loss, and full detector verification)
-   - **Cells 16–22**: Week 3 (mAP evaluation, mosaic augmentation, and full training run)
+   - **Cells 16–22**: Week 3 (mAP evaluation, mosaic augmentation, and baseline training)
+   - **Cells 23–28**: Week 4 (K-means anchors, EMA verification, multi-session training, debug checklist)
 
 If you prefer running locally:
 ```bash
