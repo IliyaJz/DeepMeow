@@ -214,8 +214,8 @@ def validate(model, loader, device, conf_threshold=0.25, iou_threshold=0.45):
     return evaluator.compute()
 
 
-# ─── Checkpoint Utilities ─────────────────────────────────────────
-def save_checkpoint(model, optimizer, scheduler, epoch, metrics, path: Path):
+# ─── Checkpoint & Logging Utilities ────────────────────────────────
+def save_checkpoint(model, optimizer, scheduler, epoch, metrics, path: Path, history=None):
     """Save full training state to disk for resuming later."""
     torch.save({
         "epoch":        epoch,
@@ -223,12 +223,13 @@ def save_checkpoint(model, optimizer, scheduler, epoch, metrics, path: Path):
         "optim_state":  optimizer.state_dict(),
         "sched_state":  scheduler.state_dict(),
         "metrics":      metrics,
+        "history":      history or {},
     }, path)
     print(f"  Checkpoint saved to {path}")
 
 
 def load_checkpoint(path: Path, model, optimizer, scheduler):
-    """Load training state from a checkpoint file."""
+    """Load training state and history from a checkpoint file."""
     ckpt = torch.load(path, map_location="cpu")
     model.load_state_dict(ckpt["model_state"])
     optimizer.load_state_dict(ckpt["optim_state"])
@@ -236,8 +237,9 @@ def load_checkpoint(path: Path, model, optimizer, scheduler):
     prev_map = ckpt.get("metrics", {}).get("mAP_50", 0.0)
     if prev_map is None:
         prev_map = 0.0
+    history = ckpt.get("history", {})
     print(f"  Resumed from epoch {ckpt['epoch']} (previous best mAP@50: {prev_map:.4f})")
-    return ckpt["epoch"], float(prev_map)
+    return ckpt["epoch"], float(prev_map), history
 
 
 # ─── Main Training Function ───────────────────────────────────────
@@ -250,6 +252,7 @@ def train(
     weight_decay: float = 1e-4,
     warmup_epochs: int  = 3,
     num_workers: int    = 2,
+    val_interval: int   = 1,
     resume: str    = None,
 ):
     """
@@ -333,6 +336,15 @@ def train(
     # ── Resume from checkpoint (optional) ────────────────────────
     start_epoch = 0
     best_map    = 0.0
+    history     = {
+        "train_loss": [],
+        "loss_box":   [],
+        "loss_obj":   [],
+        "loss_cls":   [],
+        "val_map50":  [],
+        "val_map_all": [],
+        "lr":         [],
+    }
 
     if resume:
         resume_path = None
@@ -346,12 +358,13 @@ def train(
             resume_path = Path(resume)
 
         if resume_path and resume_path.exists():
-            start_epoch, best_map = load_checkpoint(resume_path, model, optimizer, scheduler)
+            start_epoch, best_map, loaded_hist = load_checkpoint(resume_path, model, optimizer, scheduler)
+            if loaded_hist and isinstance(loaded_hist, dict):
+                for k in history:
+                    if k in loaded_hist:
+                        history[k] = list(loaded_hist[k])
         else:
             print(f"  Checkpoint not found at '{resume}', starting from epoch 1.")
-
-    # ── Training Loop ─────────────────────────────────────────────
-    history = {"train_loss": [], "val_map50": [], "lr": []}
 
     print("\n" + "=" * 60)
     print(f"Starting training (Epoch {start_epoch + 1} to {epochs})...")
@@ -367,8 +380,8 @@ def train(
         train_losses = train_one_epoch(model, optimizer, train_loader, device, epoch + 1)
         scheduler.step()
 
-        # ── Validate (every 5 epochs and last epoch) ──────────────
-        do_val = ((epoch + 1) % 5 == 0) or (epoch + 1 == epochs)
+        # ── Validate (every val_interval epochs and last epoch) ───
+        do_val = ((epoch + 1) % val_interval == 0) or (epoch + 1 == epochs)
         if do_val:
             print("  Running validation...")
             val_metrics = validate(model, val_loader, device)
@@ -378,24 +391,36 @@ def train(
             val_metrics = {"mAP_50": None, "mAP_50_95": None}
 
         # ── Record history ────────────────────────────────────────
-        history["train_loss"].append(train_losses["total"])
-        history["val_map50"].append(val_metrics["mAP_50"])
-        history["lr"].append(current_lr)
+        history["train_loss"].append(float(train_losses["total"]))
+        history["loss_box"].append(float(train_losses["box"]))
+        history["loss_obj"].append(float(train_losses["obj"]))
+        history["loss_cls"].append(float(train_losses["cls"]))
+        history["val_map50"].append(float(val_metrics["mAP_50"]) if val_metrics["mAP_50"] is not None else None)
+        history["val_map_all"].append(float(val_metrics["mAP_50_95"]) if val_metrics["mAP_50_95"] is not None else None)
+        history["lr"].append(float(current_lr))
+
+        # ── Persist history.json to disk ──────────────────────────
+        try:
+            import json
+            with open(save_dir / "history.json", "w") as f:
+                json.dump(history, f, indent=2)
+        except Exception as e:
+            pass
 
         # ── Save latest checkpoint every epoch ───────────────────
         save_checkpoint(model, optimizer, scheduler, epoch + 1, val_metrics,
-                        save_dir / "latest.pt")
+                        save_dir / "latest.pt", history=history)
 
         # ── Save periodic checkpoint every 10 epochs ─────────────
         if (epoch + 1) % 10 == 0:
             save_checkpoint(model, optimizer, scheduler, epoch + 1, val_metrics,
-                            save_dir / f"epoch_{epoch+1:03d}.pt")
+                            save_dir / f"epoch_{epoch+1:03d}.pt", history=history)
 
         # ── Save best model (by mAP@50) ───────────────────────────
         if val_metrics["mAP_50"] is not None and val_metrics["mAP_50"] > best_map:
             best_map = val_metrics["mAP_50"]
             save_checkpoint(model, optimizer, scheduler, epoch + 1, val_metrics,
-                            save_dir / "best.pt")
+                            save_dir / "best.pt", history=history)
             print(f"  New best mAP@50: {best_map:.4f}")
 
         epoch_time = time.time() - epoch_start
@@ -424,6 +449,8 @@ if __name__ == "__main__":
     parser.add_argument("--weight_decay", type=float, default=1e-4)
     parser.add_argument("--warmup_epochs",type=int,   default=3)
     parser.add_argument("--num_workers",  type=int,   default=2)
+    parser.add_argument("--val_interval",  type=int,   default=1,
+                        help="Validate every N epochs")
     parser.add_argument("--resume",       type=str,   default=None,
                         help="Path to checkpoint to resume from")
 
@@ -438,5 +465,6 @@ if __name__ == "__main__":
         weight_decay  = args.weight_decay,
         warmup_epochs = args.warmup_epochs,
         num_workers   = args.num_workers,
+        val_interval  = args.val_interval,
         resume        = args.resume,
     )
