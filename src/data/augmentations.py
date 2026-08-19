@@ -64,7 +64,6 @@ def get_train_transform(input_size: int = 416):
                 min_height=input_size,
                 min_width=input_size,
                 border_mode=0,          # 0 = constant padding (black)
-                fill_value=(0, 0, 0),   # Black padding (fill_value replaces deprecated 'value')
             ),
             
             # Flip horizontally with 50% probability.
@@ -73,17 +72,12 @@ def get_train_transform(input_size: int = 416):
             A.HorizontalFlip(p=0.5),
             
             # Randomly scale and shift the image slightly.
-            # scale: zoom in/out by up to 10%
-            # translate_percent: shift up/down/left/right by up to 5%
-            # Affine replaces the deprecated ShiftScaleRotate.
-            # translate_percent shifts the image up to 5% in x and y.
-            # scale randomly zooms in/out by up to 10%.
+            # translate_percent shifts up to 5%, scale zooms 0.9x-1.1x
             A.Affine(
                 translate_percent={"x": (-0.05, 0.05), "y": (-0.05, 0.05)},
                 scale=(0.9, 1.1),
-                rotate=0,          # No rotation
+                rotate=0,
                 p=0.3,
-                mode=0,            # constant border (black)
             ),
             
             # ── Color / appearance transforms ───────────────────────
@@ -138,7 +132,6 @@ def get_val_transform(input_size: int = 416):
                 min_height=input_size,
                 min_width=input_size,
                 border_mode=0,
-                fill_value=(0, 0, 0),
             ),
             # Normalize
             A.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
