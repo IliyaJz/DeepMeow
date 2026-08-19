@@ -71,7 +71,8 @@ def collate_fn(batch):
 
 
 # ─── Learning Rate Schedule ───────────────────────────────────────
-def build_lr_scheduler(optimizer, total_epochs: int, warmup_epochs: int):
+def build_lr_scheduler(optimizer, total_epochs: int, warmup_epochs: int,
+                       start_epoch: int = 0):
     """
     Build a combined Warmup + Cosine Annealing LR scheduler.
 
@@ -79,25 +80,41 @@ def build_lr_scheduler(optimizer, total_epochs: int, warmup_epochs: int):
         lr = base_lr * (epoch / warmup_epochs)   <- linear ramp
 
     After warmup:
-        lr = base_lr * 0.5 * (1 + cos(pi * (epoch - warmup) / (total - warmup)))
-        <- cosine decay from base_lr down to near 0
+        lr = base_lr * [eta_min + 0.5*(1-eta_min)*(1 + cos(pi * progress))]
+        <- cosine decay from base_lr down to eta_min fraction (5% of base_lr)
+
+    The eta_min floor prevents LR from collapsing to ~0 before the model
+    has converged — particularly important when training is still improving
+    at the end of a session (mAP still climbing as LR hits zero).
+
+    When resuming, pass start_epoch so the cosine position is computed
+    relative to the full schedule (total_epochs), not restarted from 0.
 
     Args:
         optimizer     (Optimizer): The AdamW optimizer
-        total_epochs  (int):       Total number of training epochs
+        total_epochs  (int):       Total number of training epochs (the final target)
         warmup_epochs (int):       Number of warmup epochs
+        start_epoch   (int):       Epoch to start from (for resume; default 0)
 
     Returns:
         scheduler (LambdaLR): The combined scheduler
     """
+    ETA_MIN = 0.05  # LR floor: 5% of base_lr (never fully dies)
+
     def lr_lambda(epoch):
-        if epoch < warmup_epochs:
+        # `epoch` here is the offset from start_epoch (PyTorch LambdaLR counts
+        # from 0 each time).  We convert it to absolute epoch index.
+        abs_epoch = start_epoch + epoch
+        if abs_epoch < warmup_epochs:
             # Linear warmup: ramp from 0 to 1
-            return (epoch + 1) / warmup_epochs
+            return max((abs_epoch + 1) / warmup_epochs, 1e-6)
         else:
-            # Cosine annealing: decay from 1 to ~0
-            progress = (epoch - warmup_epochs) / max(1, total_epochs - warmup_epochs)
-            return 0.5 * (1.0 + torch.cos(torch.tensor(torch.pi * progress)).item())
+            # Cosine annealing with eta_min floor
+            progress = (abs_epoch - warmup_epochs) / max(1, total_epochs - warmup_epochs)
+            progress = min(progress, 1.0)  # clamp so it never exceeds 1
+            cosine_decay = 0.5 * (1.0 + torch.cos(torch.tensor(torch.pi * progress)).item())
+            # Scale cosine from [0,1] into [eta_min, 1]
+            return ETA_MIN + (1.0 - ETA_MIN) * cosine_decay
 
     return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
@@ -330,9 +347,6 @@ def train(
         {"params": no_decay_params, "weight_decay": 0.0},
     ], lr=lr)
 
-    # ── Build LR Scheduler ────────────────────────────────────────
-    scheduler = build_lr_scheduler(optimizer, epochs, warmup_epochs)
-
     # ── Resume from checkpoint (optional) ────────────────────────
     start_epoch = 0
     best_map    = 0.0
@@ -358,13 +372,34 @@ def train(
             resume_path = Path(resume)
 
         if resume_path and resume_path.exists():
-            start_epoch, best_map, loaded_hist = load_checkpoint(resume_path, model, optimizer, scheduler)
+            # Load model + optimizer weights from checkpoint.
+            # We intentionally do NOT restore scheduler state — the saved state
+            # locked the cosine position to the old total_epochs value.  Instead
+            # we rebuild the scheduler below so the cosine position is correct
+            # for the NEW total_epochs target.
+            ckpt = torch.load(resume_path, map_location="cpu")
+            model.load_state_dict(ckpt["model_state"])
+            optimizer.load_state_dict(ckpt["optim_state"])
+            start_epoch = ckpt["epoch"]
+            prev_map    = ckpt.get("metrics", {}).get("mAP_50", 0.0)
+            if prev_map is None:
+                prev_map = 0.0
+            best_map = float(prev_map)
+            loaded_hist = ckpt.get("history", {})
+            print(f"  Resumed from epoch {start_epoch} (previous best mAP@50: {best_map:.4f})")
             if loaded_hist and isinstance(loaded_hist, dict):
                 for k in history:
                     if k in loaded_hist:
                         history[k] = list(loaded_hist[k])
         else:
             print(f"  Checkpoint not found at '{resume}', starting from epoch 1.")
+
+    # ── Build LR Scheduler (after resume so start_epoch is known) ─────
+    # Builds the cosine schedule relative to the full [0 → epochs] plan,
+    # positioned at start_epoch — so a resumed run continues smoothly from
+    # the correct LR position rather than restarting the cosine from 0.
+    scheduler = build_lr_scheduler(optimizer, epochs, warmup_epochs,
+                                   start_epoch=start_epoch)
 
     print("\n" + "=" * 60)
     print(f"Starting training (Epoch {start_epoch + 1} to {epochs})...")
