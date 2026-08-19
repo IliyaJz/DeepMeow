@@ -47,6 +47,7 @@ from src.models.detector import DeepMeowDetector
 from src.data.dataset import CatDataset
 from src.data.augmentations import build_train_transform, build_val_transform
 from src.utils.metrics import MeanAveragePrecision
+from src.utils.ema import ModelEMA
 
 
 # ─── Collate function ─────────────────────────────────────────────
@@ -120,7 +121,8 @@ def build_lr_scheduler(optimizer, total_epochs: int, warmup_epochs: int,
 
 
 # ─── Training Epoch ───────────────────────────────────────────────
-def train_one_epoch(model, optimizer, loader, device, epoch, max_grad_norm=10.0):
+def train_one_epoch(model, optimizer, loader, device, epoch,
+                    ema=None, max_grad_norm=10.0):
     """
     Run one full epoch of training.
 
@@ -173,6 +175,10 @@ def train_one_epoch(model, optimizer, loader, device, epoch, max_grad_norm=10.0)
 
         # ── Weight update ────────────────────────────────────────
         optimizer.step()
+
+        # ── EMA update ───────────────────────────────────────────
+        if ema is not None:
+            ema.update(model)
 
         # ── Accumulate loss for reporting ────────────────────────
         total_loss += loss_dict["total"]
@@ -232,16 +238,20 @@ def validate(model, loader, device, conf_threshold=0.25, iou_threshold=0.45):
 
 
 # ─── Checkpoint & Logging Utilities ────────────────────────────────
-def save_checkpoint(model, optimizer, scheduler, epoch, metrics, path: Path, history=None):
+def save_checkpoint(model, optimizer, scheduler, epoch, metrics, path: Path,
+                    history=None, ema=None):
     """Save full training state to disk for resuming later."""
-    torch.save({
+    payload = {
         "epoch":        epoch,
         "model_state":  model.state_dict(),
         "optim_state":  optimizer.state_dict(),
         "sched_state":  scheduler.state_dict(),
         "metrics":      metrics,
         "history":      history or {},
-    }, path)
+    }
+    if ema is not None:
+        payload["ema_state"] = ema.state_dict()
+    torch.save(payload, path)
     print(f"  Checkpoint saved to {path}")
 
 
@@ -271,20 +281,23 @@ def train(
     num_workers: int    = 2,
     val_interval: int   = 1,
     resume: str    = None,
+    use_ema: bool  = True,
 ):
     """
     Full training pipeline.
 
     Args:
-        data_root     (str): Path to dataset root (e.g. 'data' or Google Drive path)
-        save_dir      (str): Directory to save checkpoints
-        epochs        (int): Total training epochs
-        batch_size    (int): Images per batch
+        data_root     (str):  Path to dataset root (e.g. 'data' or Google Drive path)
+        save_dir      (str):  Directory to save checkpoints
+        epochs        (int):  Total training epochs
+        batch_size    (int):  Images per batch
         lr            (float): Initial learning rate for AdamW
         weight_decay  (float): L2 regularization strength
-        warmup_epochs (int): Number of LR warmup epochs
-        num_workers   (int): DataLoader worker processes (use 2 in Colab)
-        resume        (str): Path to checkpoint to resume training from (or None)
+        warmup_epochs (int):  Number of LR warmup epochs
+        num_workers   (int):  DataLoader worker processes (use 2 in Colab)
+        val_interval  (int):  Validate every N epochs
+        resume        (str):  Path to checkpoint to resume training from (or None)
+        use_ema       (bool): Whether to maintain EMA model weights (recommended: True)
     """
     device   = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     save_dir = Path(save_dir)
@@ -333,6 +346,13 @@ def train(
     # ── Build Model ───────────────────────────────────────────────
     model = DeepMeowDetector(num_classes=1, input_size=416).to(device)
     print(f"Model parameters: {model.count_parameters():,}")
+
+    # ── Build EMA model ───────────────────────────────────────────
+    # EMA maintains a smoothed shadow copy of the weights.
+    # We validate on the EMA model, not the raw training model.
+    ema = ModelEMA(model, decay=0.9999).to(device) if use_ema else None
+    if use_ema:
+        print("EMA enabled (decay=0.9999)")
 
     # ── Build Optimizer ───────────────────────────────────────────
     # Separate weight decay: apply to weights but NOT to biases or BatchNorm params.
@@ -391,6 +411,10 @@ def train(
                 for k in history:
                     if k in loaded_hist:
                         history[k] = list(loaded_hist[k])
+            # Restore EMA state if present in checkpoint
+            if ema is not None and "ema_state" in ckpt:
+                ema.load_state_dict(ckpt["ema_state"])
+                print(f"  EMA state restored (step {ema.step})")
         else:
             print(f"  Checkpoint not found at '{resume}', starting from epoch 1.")
 
@@ -412,14 +436,17 @@ def train(
         print(f"\nEpoch {epoch + 1}/{epochs}  (LR = {current_lr:.2e})")
 
         # ── Train ─────────────────────────────────────────────────
-        train_losses = train_one_epoch(model, optimizer, train_loader, device, epoch + 1)
+        train_losses = train_one_epoch(model, optimizer, train_loader, device,
+                                       epoch + 1, ema=ema)
         scheduler.step()
 
         # ── Validate (every val_interval epochs and last epoch) ───
+        # Validate on the EMA model if available — smoother weights = better mAP
+        eval_model = ema.ema_model if ema is not None else model
         do_val = ((epoch + 1) % val_interval == 0) or (epoch + 1 == epochs)
         if do_val:
             print("  Running validation...")
-            val_metrics = validate(model, val_loader, device)
+            val_metrics = validate(eval_model, val_loader, device)
             print(f"  mAP@50     : {val_metrics['mAP_50']:.4f}")
             print(f"  mAP@50:95  : {val_metrics['mAP_50_95']:.4f}")
         else:
@@ -444,18 +471,18 @@ def train(
 
         # ── Save latest checkpoint every epoch ───────────────────
         save_checkpoint(model, optimizer, scheduler, epoch + 1, val_metrics,
-                        save_dir / "latest.pt", history=history)
+                        save_dir / "latest.pt", history=history, ema=ema)
 
         # ── Save periodic checkpoint every 10 epochs ─────────────
         if (epoch + 1) % 10 == 0:
             save_checkpoint(model, optimizer, scheduler, epoch + 1, val_metrics,
-                            save_dir / f"epoch_{epoch+1:03d}.pt", history=history)
+                            save_dir / f"epoch_{epoch+1:03d}.pt", history=history, ema=ema)
 
         # ── Save best model (by mAP@50) ───────────────────────────
         if val_metrics["mAP_50"] is not None and val_metrics["mAP_50"] > best_map:
             best_map = val_metrics["mAP_50"]
             save_checkpoint(model, optimizer, scheduler, epoch + 1, val_metrics,
-                            save_dir / "best.pt", history=history)
+                            save_dir / "best.pt", history=history, ema=ema)
             print(f"  New best mAP@50: {best_map:.4f}")
 
         epoch_time = time.time() - epoch_start
@@ -488,6 +515,8 @@ if __name__ == "__main__":
                         help="Validate every N epochs")
     parser.add_argument("--resume",       type=str,   default=None,
                         help="Path to checkpoint to resume from")
+    parser.add_argument("--no_ema",       action="store_true",
+                        help="Disable EMA model tracking")
 
     args = parser.parse_args()
 
@@ -502,4 +531,5 @@ if __name__ == "__main__":
         num_workers   = args.num_workers,
         val_interval  = args.val_interval,
         resume        = args.resume,
+        use_ema       = not args.no_ema,
     )
