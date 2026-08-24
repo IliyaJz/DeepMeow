@@ -376,15 +376,21 @@ class DeepSORTTracker(SORTTracker):
             sub_cost = 1.0 - iou_matrix
             sub_valid = iou_matrix >= self.iou_threshold
 
-            sub_matches, rem_unmatched_d, rem_unmatched_t = assign(
+            # assign(): rows = leftover tracks, cols = leftover detections;
+            # returns (matches_as_(trk,det), unmatched_rows, unmatched_cols).
+            sub_matches, sub_unmatched_rows, sub_unmatched_cols = assign(
                 sub_cost, valid_mask=sub_valid,
             )
 
-            # Map local indices back to original indices
-            for local_d, local_t in sub_matches:
-                matches_s1.append((unmatched_d[local_d], unmatched_t[local_t]))
-            unmatched_d = [unmatched_d[i] for i in rem_unmatched_d]
-            unmatched_t = [unmatched_t[i] for i in rem_unmatched_t]
+            # Map local indices back to original indices, converting each
+            # pair from (trk_local, det_local) to the (det_idx, trk_idx)
+            # convention used by update().
+            for trk_local, det_local in sub_matches:
+                matches_s1.append(
+                    (unmatched_d[det_local], unmatched_t[trk_local])
+                )
+            unmatched_d = [unmatched_d[i] for i in sub_unmatched_cols]
+            unmatched_t = [unmatched_t[i] for i in sub_unmatched_rows]
 
         return matches_s1, unmatched_d, unmatched_t
 
