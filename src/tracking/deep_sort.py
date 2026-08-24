@@ -43,6 +43,7 @@ from src.tracking.kalman_filter import (
     KalmanBoxFilter,
     xyxy_to_cxcyah,
 )
+from src.tracking.hungarian import assign
 from src.tracking.sort import Track, SORTTracker
 from src.utils.boxes import compute_iou
 from src.data.augmentations import IMAGENET_MEAN, IMAGENET_STD
