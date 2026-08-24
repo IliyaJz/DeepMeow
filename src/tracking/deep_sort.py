@@ -353,7 +353,15 @@ class DeepSORTTracker(SORTTracker):
                         and cos_d <= self.max_cosine_distance
                     )
 
-            matches_s1, unmatched_d, unmatched_t = assign(cost, valid_mask=valid)
+            # assign() solves rows=tracks × cols=detections and returns
+            # (matches, unmatched_rows, unmatched_cols) in (trk, det) order;
+            # convert to the (det_idx, trk_idx) convention used below.
+            raw_matches, unmatched_rows, unmatched_cols = assign(
+                cost, valid_mask=valid,
+            )
+            matches_s1 = [(c, r) for r, c in raw_matches]
+            unmatched_d = unmatched_cols      # detection indices
+            unmatched_t = unmatched_rows      # track indices
         else:
             # No appearance info available → everything goes to stage 2
             unmatched_d = list(range(num_dets))

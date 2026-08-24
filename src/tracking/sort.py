@@ -278,7 +278,14 @@ class SORTTracker:
 
         valid_mask = iou_matrix >= self.iou_threshold
 
-        return assign(cost_matrix, valid_mask=valid_mask)
+        # assign() solves rows=tracks × cols=detections and returns
+        # (matches, unmatched_rows, unmatched_cols) in (trk, det) order;
+        # convert to the (det_idx, trk_idx) contract of update().
+        matches, unmatched_rows, unmatched_cols = assign(
+            cost_matrix, valid_mask=valid_mask,
+        )
+        matches = [(c, r) for r, c in matches]
+        return matches, unmatched_cols, unmatched_rows
 
 
 # ─── Quick sanity test ─────────────────────────────────────────────
