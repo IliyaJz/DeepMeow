@@ -324,9 +324,10 @@ if __name__ == "__main__":
     for t in range(1, 30):
         mean, cov = kf.predict(mean, cov)
         # Prediction error BEFORE seeing this frame's detection
-        pred_err = np.linalg.norm(cxcyah_to_xyxy(mean)[:2] - true_centers[t])
+        # (state layout is [cx, cy, w, h, ...], so center = mean[:2])
+        pred_err = np.linalg.norm(mean[:2] - true_centers[t])
         mean, cov = kf.update(mean, cov, measurements[t])
-        filt_err = np.linalg.norm(cxcyah_to_xyxy(mean)[:2] - true_centers[t])
+        filt_err = np.linalg.norm(mean[:2] - true_centers[t])
         pred_errors.append(pred_err)
         filt_errors.append(filt_err)
 
