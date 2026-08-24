@@ -254,15 +254,24 @@ if __name__ == "__main__":
     else:
         print("  Test 3 skipped (scipy not installed)")
 
-    # Test 4: gating via assign() — forbid bad pairs
-    cost = np.array([[0.9, 0.1],
-                     [0.2, 0.8]])
+    # Test 4: gating via assign() — forbidden pairs are never matched;
+    # the solver falls back to the next-best fully-valid pairing
+    cost = np.array([[4., 1.],
+                     [2., 0.]])
     mask = np.array([[True, True],
                      [False, True]])  # row1 may NOT take col0
     matches, unr, unc = assign(cost, valid_mask=mask)
-    assert (0, 1) in matches and (1, 1) not in matches, \
+    assert (1, 0) not in matches, \
         f"forbidden pair was assigned: {matches}"
-    assert 1 in unc, "row 1 should end unmatched"
+    assert sorted(matches) == [(0, 0), (1, 1)], \
+        f"gated fallback wrong: {matches}"
+
+    # A row with NO admissible pair stays unmatched instead of force-pairing
+    mask = np.array([[True, True],
+                     [False, False]])
+    matches, unr, unc = assign(cost, valid_mask=mask)
+    assert (0, 1) in matches and unr == [1], \
+        f"fully-masked row should stay unmatched: {matches}, {unr}"
     print(f"  Test 4 (gated assignment): matches={matches}, "
           f"unmatched rows={unr}")
 
