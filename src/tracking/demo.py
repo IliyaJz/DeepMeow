@@ -62,7 +62,11 @@ def preprocess_frame(frame_bgr: np.ndarray, input_size: int = 416) -> torch.Tens
     rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
     rgb = cv2.resize(rgb, (input_size, input_size))
     arr = rgb.astype(np.float32) / 255.0
-    arr = (arr - np.array([0.485, 0.456, 0.406])) / np.array([0.229, 0.224, 0.225])
+    # mean/std must be float32 — default float64 would silently promote the
+    # whole array and the model would receive a DoubleTensor.
+    mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+    std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+    arr = (arr - mean) / std
     return torch.from_numpy(arr.transpose(2, 0, 1)).unsqueeze(0)  # [1,3,H,W]
 
 
