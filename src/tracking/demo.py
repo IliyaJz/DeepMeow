@@ -26,8 +26,15 @@ The tracker keeps IDs across short occlusions; each box shows
 """
 
 import argparse
+import sys
 import time
 from pathlib import Path
+
+# Allow launching from any working directory:
+# put the repo root on sys.path so `from src...` resolves.
+_REPO_ROOT = str(Path(__file__).resolve().parents[2])
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
 import cv2
 import numpy as np
