@@ -46,9 +46,14 @@ DeepMeow/
 │   │   ├── metrics.py         # COCO-style mAP evaluation (mAP@50 & mAP@50:95)
 │   │   ├── ema.py             # ModelEMA (Exponential Moving Average) weight smoothing
 │   │   └── kmeans_anchors.py  # 1-IoU K-Means anchor clustering for custom datasets
-│   └── tracking/              # SORT & DeepSORT tracking (Week 5)
+│   └── tracking/              # Multi-object tracking engine (Week 5)
+│       ├── kalman_filter.py   # 8-D constant-velocity Kalman filter + Mahalanobis gating
+│       ├── hungarian.py       # From-scratch O(n²m) Hungarian assignment algorithm
+│       ├── sort.py            # SORT: Kalman predict → IoU cost → Hungarian → lifecycle
+│       ├── deep_sort.py       # DeepSORT: appearance CNN (128-D) + cascaded matching
+│       └── demo.py            # End-to-end video demo (detector + tracker + trails)
 ├── configs/
-│   └── default.yaml           # Central hyperparameter configuration
+│   └── default.yaml           # Central hyperparameter configuration (incl. tracking)
 └── requirements.txt           # Environment dependencies
 ```
 
@@ -83,10 +88,14 @@ We are following a 6-week research build schedule:
   - Updated validation to evaluate on smoothed EMA weights for enhanced stability and mAP gains
   - Built multi-session training workflow with LR schedule position recovery and cosine floor ($\eta_{\text{min}}$) for Google Colab
 
-- [ ] **Week 5: Multi-Object Tracking Engine (SORT / DeepSORT)**
-  - Implementing 8D linear Kalman Filter for bounding box trajectory state estimation
-  - Implementing Hungarian algorithm assignment matrix solving
-  - Integrating appearance embeddings for occlusion handling
+- [x] **Week 5: Multi-Object Tracking Engine (SORT / DeepSORT)**
+  - Implemented an 8-D constant-velocity Kalman filter from scratch (NumPy): state $[c_x, c_y, w, h, \dot{c_x}, \dot{c_y}, \dot{w}, \dot{h}]$, predict/update cycles, and squared-Mahalanobis gating with the $\chi^2$ (95%, dof=4) threshold
+  - Implemented the Hungarian assignment algorithm from scratch ($O(n^2 m)$ shortest-augmenting-path variant with dual potentials) — verified optimal against brute force and `scipy.optimize.linear_sum_assignment` on random matrices
+  - Built the SORT tracker: per-frame Kalman prediction → IoU cost matrix ($1 - \mathrm{IoU}$) → Hungarian matching → track lifecycle (`max_age` occlusion tolerance, `min_hits` confirmation)
+  - Built a lightweight appearance extractor (~1M params, ResNet-flavored CNN → global average pool → 128-D L2-normalized embedding) for detection crops
+  - Implemented DeepSORT cascaded matching: appearance stage combining cosine gallery distance (min over last K=100 views) with Mahalanobis motion cost, $d = \lambda \, d_{\text{Mahalanobis}} + (1-\lambda)\, d_{\text{cosine}}$, double-gated by $\chi^2$ + cosine thresholds; IoU fallback stage for leftovers
+  - Sanity tests: constant-velocity trajectory recovery through detector dropouts, crossing-cats identity preservation under shuffled detection order, gallery budget trimming
+  - Added `src/tracking/demo.py`: end-to-end video pipeline rendering boxes, persistent IDs, confidence labels and motion trails
 
 - [ ] **Week 6: Inference Pipeline, Profiling & Portfolio Documentation**
   - Building real-time video processing pipeline with visual track histories
@@ -127,6 +136,51 @@ Total predictions per image: 52x52x3 + 26x26x3 + 13x13x3 = **10,647 anchors**
 
 ---
 
+## Tracking Engine Overview (Week 5)
+
+Detections are streamed into a multi-object tracker that maintains persistent cat identities across frames:
+
+```
+Frame t detections [N, 4]          Existing tracks {Kalman state}
+            \                            |
+             ▼                           ▼
+      ┌─────────────────────────────────────────┐
+      │ 1. PREDICT — Kalman filter advances     │
+      │    every track one frame ahead          │
+      │    x' = Fx,   P' = FPFᵀ + Q             │
+      ├─────────────────────────────────────────┤
+      │ 2. ASSOCIATE (cascaded, DeepSORT)       │
+      │    a. appearance:                       │
+      │       d = λ·d_mahalanobis               │
+      │         + (1−λ)·d_cosine(gallery)       │
+      │       gated by χ²(9.49) & cosine ≤ 0.25 │
+      │    b. fallback: IoU ≥ threshold         │
+      │       both solved via Hungarian alg.    │
+      ├─────────────────────────────────────────┤
+      │ 3. UPDATE                               │
+      │    matched    → Kalman correction +     │
+      │                 gallery.append(embed)   │
+      │    unmatched det → new track            │
+      │    unmatched trk → coast (≤ max_age)    │
+      └─────────────────────────────────────────┘
+             |
+             ▼
+   Tracked outputs: [{id, box, score, trail}]
+```
+
+**Key components:**
+
+| Module | What it does | Built from scratch? |
+|--------|--------------|---------------------|
+| `tracking/kalman_filter.py` | Constant-velocity motion model; smooths jittery detections and coasts through occlusions | Yes (NumPy linear algebra) |
+| `tracking/hungarian.py` | Optimal detection↔track assignment on cost matrices | Yes ($O(n^2m)$ augmenting-path variant) |
+| `tracking/sort.py` | Track lifecycle: prediction, IoU association, spawn/confirm/delete | Yes |
+| `tracking/deep_sort.py` | Appearance embeddings + cascaded matching to prevent ID switches at crossings | Yes (~1M-param CNN + matching logic) |
+
+The tracker tolerates detector dropouts up to `max_age=30` frames (~1 s), suppresses false positives with `min_hits=3`, and keeps identities stable when cats cross paths by comparing each detection's 128-D crop embedding against every stored view of a track.
+
+---
+
 ## Running the Pipeline (Google Colab)
 
 To replicate our experiments without setting up a local GPU environment:
@@ -138,6 +192,7 @@ To replicate our experiments without setting up a local GPU environment:
    - **Cells 9–15**: Week 2 (FPN, head, loss, and full detector verification)
    - **Cells 16–22**: Week 3 (mAP evaluation, mosaic augmentation, and baseline training)
    - **Cells 23–28**: Week 4 (K-means anchors, EMA verification, multi-session training, debug checklist)
+   - *Week 5 tracking notebook cells: coming soon*
 
 If you prefer running locally:
 ```bash
@@ -145,4 +200,24 @@ git clone https://github.com/IliyaJz/DeepMeow.git
 cd DeepMeow
 pip install -r requirements.txt
 python src/data/downloader.py
+```
+
+### Verifying the Tracking Engine (Week 5)
+
+Each tracking module ships with a standalone sanity-test block that runs without any data or GPU:
+
+```bash
+python src/tracking/kalman_filter.py   # trajectory recovery + Mahalanobis gating tests
+python src/tracking/hungarian.py       # brute-force + scipy optimality cross-checks
+python src/tracking/sort.py            # occlusion persistence + two-cat ID separation
+python src/tracking/deep_sort.py       # extractor shapes + crossing-cats identity test
+```
+
+Once a detector checkpoint exists, produce a tracked demo video:
+
+```bash
+python src/tracking/demo.py \
+    --video path/to/cats.mp4 \
+    --checkpoint checkpoints/best.pth \
+    --out results/tracked_demo.mp4
 ```

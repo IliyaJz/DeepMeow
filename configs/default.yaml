@@ -46,6 +46,21 @@ eval:
   conf_threshold: 0.25    # Minimum confidence score to keep a detection
   iou_threshold:  0.45    # NMS threshold: remove boxes that overlap more than this
 
+# ─── Tracking (Week 5) ────────────────────────────────────────────
+# Used by src/tracking/sort.py, deep_sort.py and demo.py
+tracking:
+  max_age: 30              # frames a track survives without a detection
+                           # (~1 s of occlusion at 30 fps before deletion)
+  min_hits: 3              # detections needed before a track ID is reported
+  iou_threshold: 0.3       # minimum IoU for the IoU-fallback association stage
+
+  appearance:
+    embedding_dim: 128     # size of the appearance feature vector
+    gallery_budget: 100    # embeddings stored per track (last K views)
+    max_cosine_distance: 0.25  # pairs further apart are never matched
+    lambda_mahalanobis: 0.5    # λ in d = λ·d_mahalanobis + (1−λ)·d_cosine
+    mahalanobis_gate: 9.4877   # chi-square(95%, dof=4) motion plausibility gate
+
 # ─── Paths ────────────────────────────────────────────────────────
 paths:
   checkpoint_dir: "checkpoints"    # Where to save model snapshots
