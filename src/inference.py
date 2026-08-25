@@ -36,6 +36,7 @@ import numpy as np
 import torch
 
 from src.models.detector import DeepMeowDetector
+from src.optimize import OptimizedPredictor
 from src.tracking.demo import draw_tracks, preprocess_frame, scale_boxes_back
 from src.tracking.deep_sort import AppearanceExtractor, DeepSORTTracker
 
@@ -55,11 +56,18 @@ class CatDetectorTracker:
                                {'max_age': 30, 'min_hits': 3,
                                 'iou_threshold': 0.3}.
         use_ema        (bool): prefer EMA weights inside the checkpoint.
+        optimize       (bool): use the optimized detector path (TorchScript
+                               trace + cached anchors + fused decode, see
+                               src/optimize.py) — same detections, faster.
+        half           (bool): FP16 weights/input on CUDA (optimize path);
+                               None = auto (on for CUDA, off for CPU).
+        trace          (bool): TorchScript-trace the conv stack.
     """
 
     def __init__(self, checkpoint=None, device=None,
                  conf_threshold=0.25, nms_iou=0.45,
-                 tracker_kwargs=None, use_ema=True):
+                 tracker_kwargs=None, use_ema=True,
+                 optimize=False, half=None, trace=True):
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
 
         # ── Detector ──────────────────────────────────────────────
@@ -86,11 +94,26 @@ class CatDetectorTracker:
         self.conf_threshold = conf_threshold
         self.nms_iou = nms_iou
 
+        # ── Optional optimized detector path (Week 6, Day 3–4) ────
+        # Wraps the SAME loaded model; conf/nms thresholds are passed
+        # per call so the "slider" keeps working in fast mode too.
+        if half is None:
+            half = self.device == "cuda"
+        self._fast = OptimizedPredictor(
+            self.model, device=self.device,
+            half=half, trace=trace,
+        ) if optimize else None
+
         self._fps = 0.0
 
     # ── Detection ────────────────────────────────────────────────────
     def detect(self, frame_bgr: np.ndarray):
         """BGR frame → (boxes [N,4] xyxy @frame scale, scores [N])."""
+        if self._fast is not None:
+            boxes, scores = self._fast.detect(
+                frame_bgr, self.conf_threshold, self.nms_iou)
+            return (boxes.cpu().numpy(), scores.cpu().numpy())
+
         inp = preprocess_frame(frame_bgr, self.model.input_size).to(self.device)
         with torch.no_grad():
             dets = self.model.predict(
@@ -220,5 +243,14 @@ if __name__ == "__main__":
     assert Path(summary["output"]).exists(), "no output video written"
     assert pipeline.fps > 0, "FPS estimate not updated"
     print(f"  OK: {summary}")
+
+    # Same clip through the optimized path (traced; fp16 only on CUDA)
+    pipeline.reset()
+    fast = CatDetectorTracker(checkpoint=None, optimize=True)
+    fast_summary = fast.run_video(str(clip), "results/_smoke_tracked_fast.mp4",
+                                  verbose=False)
+    assert fast_summary["frames"] == N, "optimized path dropped frames"
+    print(f"  OK (optimize=True): {fast_summary}")
+
     clip.unlink(missing_ok=True)
     print("inference.py smoke checks passed!")
