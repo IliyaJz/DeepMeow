@@ -52,6 +52,12 @@ class CatDetectorTracker:
         conf_threshold (float): detector confidence threshold ("slider" —
                                safe to change between frames).
         nms_iou        (float): NMS IoU threshold.
+        max_detections (int):  keep only the top-K highest-score detections
+                               per frame before tracking. Protects the tracker
+                               from pathological false-positive floods (e.g.
+                               random-weight smoke tests) that would turn the
+                               O(tracks × detections) matching into minutes
+                               per frame. Real clips have ≪ 100 cats/frame.
         tracker_kwargs (dict): forwarded to DeepSORTTracker, e.g.
                                {'max_age': 30, 'min_hits': 3,
                                 'iou_threshold': 0.3}.
@@ -65,7 +71,7 @@ class CatDetectorTracker:
     """
 
     def __init__(self, checkpoint=None, device=None,
-                 conf_threshold=0.25, nms_iou=0.45,
+                 conf_threshold=0.25, nms_iou=0.45, max_detections=100,
                  tracker_kwargs=None, use_ema=True,
                  optimize=False, half=None, trace=True):
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
@@ -93,6 +99,7 @@ class CatDetectorTracker:
         # Runtime-adjustable knobs: assign any time, takes effect next frame
         self.conf_threshold = conf_threshold
         self.nms_iou = nms_iou
+        self.max_detections = int(max_detections)
 
         # ── Optional optimized detector path (Week 6, Day 3–4) ────
         # Wraps the SAME loaded model; conf/nms thresholds are passed
@@ -107,12 +114,20 @@ class CatDetectorTracker:
         self._fps = 0.0
 
     # ── Detection ────────────────────────────────────────────────────
+    def _cap_detections(self, boxes, scores):
+        """Keep only the top-K highest-score detections (K = max_detections)."""
+        if boxes.shape[0] > self.max_detections:
+            top = np.argsort(scores)[::-1][:self.max_detections]
+            boxes, scores = boxes[top], scores[top]
+        return boxes, scores
+
     def detect(self, frame_bgr: np.ndarray):
         """BGR frame → (boxes [N,4] xyxy @frame scale, scores [N])."""
         if self._fast is not None:
             boxes, scores = self._fast.detect(
                 frame_bgr, self.conf_threshold, self.nms_iou)
-            return (boxes.cpu().numpy(), scores.cpu().numpy())
+            return self._cap_detections(
+                boxes.cpu().numpy(), scores.cpu().numpy())
 
         inp = preprocess_frame(frame_bgr, self.model.input_size).to(self.device)
         with torch.no_grad():
@@ -124,7 +139,7 @@ class CatDetectorTracker:
         scores = dets["scores"].cpu().numpy()
         if boxes.shape[0] > 0:
             boxes = scale_boxes_back(boxes, frame_bgr.shape, self.model.input_size)
-        return boxes, scores
+        return self._cap_detections(boxes, scores)
 
     # ── Streaming API: one frame in → tracks (+canvas) out ──────────
     def step(self, frame_bgr: np.ndarray, draw: bool = True):

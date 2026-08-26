@@ -314,6 +314,29 @@ class DeepSORTTracker(SORTTracker):
             track.add_feature(self._frame_features[det_idx])
 
     # ── Cascaded association ──────────────────────────────────────
+    @staticmethod
+    def _gallery_min_cosine(track, feats_n: np.ndarray) -> np.ndarray:
+        """
+        Min cosine distance from every detection to a track's gallery,
+        vectorized: sims = feats_n @ gallery.T → [num_dets, K] → min over K.
+
+        Equivalent to calling AppearanceTrack.appearance_distance(f, 'min')
+        per detection, but as one matmul instead of a D×K Python loop.
+
+        Args:
+            track   : AppearanceTrack whose .features gallery is used
+            feats_n : [num_dets, D] L2-NORMALIZED detection embeddings
+
+        Returns:
+            ndarray [num_dets]: distances in [0, 2]; 1.0 for an empty gallery
+        """
+        if len(track.features) == 0:
+            return np.full(feats_n.shape[0], 1.0)
+        gallery = np.stack(track.features)                        # [K, D]
+        gallery /= np.maximum(
+            np.linalg.norm(gallery, axis=1, keepdims=True), 1e-12)
+        return 1.0 - (feats_n @ gallery.T).max(axis=1)            # [num_dets]
+
     def _associate(self, detections: np.ndarray, track_boxes: np.ndarray):
         """
         Stage 1: appearance cost (Mahalanobis + cosine) with double gating.
@@ -333,6 +356,11 @@ class DeepSORTTracker(SORTTracker):
             cost = np.zeros((num_trks, num_dets))
             valid = np.zeros((num_trks, num_dets), dtype=bool)
 
+            # L2-normalize detection embeddings once [num_dets, D]:
+            # cosine distance then reduces to 1 − dot product.
+            feats_n = feats / np.maximum(
+                np.linalg.norm(feats, axis=1, keepdims=True), 1e-12)
+
             centers = xyxy_to_cxcyah(detections)
             for ti, trk in enumerate(self.tracks):
                 # Motion plausibility of every detection for this track [num_dets]
@@ -341,17 +369,18 @@ class DeepSORTTracker(SORTTracker):
                 )
                 maha_norm = np.clip(maha_sq / self.mahalanobis_gate, 0.0, 1.0)
 
-                for dj in range(num_dets):
-                    cos_d = trk.appearance_distance(feats[dj])
-                    # md formula: d = λ·d_mahalanobis + (1−λ)·d_cosine
-                    cost[ti, dj] = (
-                        self.lambda_mahalanobis * maha_norm[dj]
-                        + (1.0 - self.lambda_mahalanobis) * cos_d
-                    )
-                    valid[ti, dj] = (
-                        maha_sq[dj] <= self.mahalanobis_gate
-                        and cos_d <= self.max_cosine_distance
-                    )
+                # Gallery distance for ALL detections at once [num_dets]
+                cos_col = self._gallery_min_cosine(trk, feats_n)
+
+                # md formula: d = λ·d_mahalanobis + (1−λ)·d_cosine
+                cost[ti] = (
+                    self.lambda_mahalanobis * maha_norm
+                    + (1.0 - self.lambda_mahalanobis) * cos_col
+                )
+                valid[ti] = (
+                    (maha_sq <= self.mahalanobis_gate)
+                    & (cos_col <= self.max_cosine_distance)
+                )
 
             # assign() solves rows=tracks × cols=detections and returns
             # (matches, unmatched_rows, unmatched_cols) in (trk, det) order;
