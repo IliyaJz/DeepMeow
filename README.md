@@ -1,8 +1,30 @@
 # DeepMeow: Real-Time Cat Detection & Multi-Object Tracking
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/IliyaJz/DeepMeow/blob/main/notebooks/DeepMeow_Colab.ipynb)
+![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
+![PyTorch](https://img.shields.io/badge/PyTorch-2.x-orange)
 
-A research-focused computer vision implementation in PyTorch. The goal of this project is to build a single-shot object detector and multi-object tracker from first principles (without relying on high-level prebuilt frameworks like `ultralytics/yolov8`), making every component fully interpretable and extensible.
+A research-focused computer vision implementation in PyTorch. The goal of this project is to build a single-shot object detector and multi-object tracker **from first principles** (without relying on high-level prebuilt frameworks like `ultralytics/yolov8`), making every component fully interpretable and extensible — down to the Kalman filter, the Hungarian algorithm and the mAP evaluator.
+
+---
+
+## 🎬 Demo — Tracked Video
+
+End-to-end pipeline (detector → DeepSORT tracker → renderer) running on a real 219-frame 1280×736 cat clip, with persistent track IDs, confidence labels and motion trails. Click the preview to watch the full-quality MP4.
+
+[![DeepMeow tracked video demo](assets/tracked_demo.gif)](assets/tracked_demo.mp4)
+
+*Tracked demo — `results/tracked_demo.mp4` reproduced from notebook §34 (Colab Tesla T4, `best.pt` checkpoint, EMA weights).*
+
+---
+
+## 🐱 Qualitative Detection Results
+
+Inference on 6 random validation images (confidence threshold 0.3, NMS IoU 0.45) using the epoch-200 checkpoint:
+
+![Inference results — 6 validation images](assets/detection_samples.png)
+
+*Notebook §21 — 5/6 images produce a correct, tightly-fitted detection (scores 0.30–0.61). The one miss (bottom-center) is a severely occluded cat curled against a sleeping person in a dark scene — a known hard case for the model (see [Limitations](#-limitations)).*
 
 ---
 
@@ -17,6 +39,55 @@ We focus on single-class detection and tracking ("cat") using annotated images f
 
 ---
 
+## 📊 Results & Evaluation
+
+### Detection accuracy (COCO-style mAP)
+
+| Item | Value |
+|---|---|
+| Dataset | COCO 2017 filtered to `cat` — **3,000 train / 184 val** images (3,444 GT boxes) |
+| Model | `DeepMeowDetector` — **49,913,366 trainable parameters**, input 416×416 |
+| Training | 200 epochs (multi-session), AdamW, LR 1e-4, batch 8, 3-epoch warmup + cosine annealing with per-session restarts, gradient clipping |
+| Stabilizers | EMA (decay 0.9999, step 56,250), 4-image Mosaic + Mixup, K-Means anchors (mean best-IoU **0.7435**) |
+| **Best mAP@50** | **0.5909** (EMA weights, epoch 135) |
+| Final mAP@50 | 0.5831 (epoch 200) |
+
+![Training curves — 150 epochs](assets/training_curves.png)
+
+*Notebook §26 — loss, validation mAP@50 (evaluated on EMA weights) and the multi-session cosine LR schedule. Validation runs every 5 epochs; the curve is still inching upward at the 200-epoch cutoff, suggesting more training or more data would help.*
+
+**Reading the numbers.** A from-scratch detector at ~0.59 mAP@50 on a single class is respectable but not production-grade — roughly on par with early YOLOv3-era single-class baselines under similar data/epoch budgets, and achieved with zero pre-trained weights. The gap to modern one-stage detectors comes from the smaller dataset (3k images), the 416×416 input resolution, and no backbone pre-training.
+
+### Tracker verification (synthetic, deterministic tests)
+
+Every tracking component ships with from-scratch sanity tests (notebook §30–33), all passing:
+
+| Component | Test | Result |
+|---|---|---|
+| Kalman filter | Constant-velocity trajectory in noise | Raw detection error **4.24 px → 2.14 px** filtered; covariance trace 200.2 → 14.5 |
+| Kalman gating | Mahalanobis χ²(95%, dof=4) gate 9.4877 | Consistent detection d²=0.01 → accept; impostor 500 px away d²=33,430 → reject |
+| Hungarian algorithm | 50 random matrices vs brute force | **50/50 optimal** |
+| Hungarian algorithm | Cross-check vs `scipy.optimize.linear_sum_assignment` | **20/20 identical totals** |
+| SORT | Cat occluded for 5 frames | Same track ID re-acquired at frame 27 (≤ tolerance) |
+| SORT | Two parallel cats | Two stable IDs, **zero switches** |
+| DeepSORT | Two cats crossing paths, detection order shuffled every frame | Both identities preserved through the crossover |
+| DeepSORT | Appearance extractor | 128-D unit-norm embeddings, 1,012,128 params |
+
+### Inference speed (Tesla T4, 1280×736 input frame, 416×416 network input)
+
+| Variant | Latency | Throughput |
+|---|---|---|
+| Baseline (eager fp32) | 36.14 ms | 27.7 FPS |
+| TorchScript-traced fp32 | 31.23 ms | 32.0 FPS |
+| **TorchScript-traced fp16** | **16.12 ms** | **62.0 FPS** |
+
+- **Equivalence contract verified**: the fp32 fast path reproduces the baseline's boxes exactly (`assert` in notebook §37) — optimization changes speed, not detections.
+- **End-to-end video** (219 frames, incl. video I/O + rendering): 19.4 FPS (demo CLI) → **24.6 FPS** with the optimized fp16 pipeline (35–38 FPS on the decode/detect path).
+- **Profiler**: cuDNN convolutions dominate the fast path (~83% of CUDA self-time) — the remaining headroom is in the conv stack, not the decode/NMS logic, which the fused decode already reduced to a single GPU pass.
+- Optimizations applied: TorchScript tracing, FP16 tensor cores, one-time anchor caching (was 10,647 rows rebuilt per frame on CPU), fused multi-scale decode, pre-allocated CUDA input buffer.
+
+---
+
 ## Repository Structure
 
 Here is how the codebase is organized so you can easily follow along with the modular pipeline:
@@ -25,15 +96,20 @@ Here is how the codebase is organized so you can easily follow along with the mo
 DeepMeow/
 ├── notebooks/
 │   └── DeepMeow_Colab.ipynb   # Interactive execution notebook (GPU recommended)
+├── assets/                    # README media (demo GIF, result grids, curves)
 ├── data/                      # Dataset root (git-ignored, generated at runtime)
 │   ├── raw/                   # COCO cat images (train/val splits)
 │   └── annotations/           # Filtered COCO JSON annotations
 ├── src/
+│   ├── train.py               # Training loop (warmup, cosine, EMA, checkpoints)
+│   ├── inference.py           # CatDetectorTracker: streaming + batch video pipeline
+│   ├── optimize.py            # TorchScript/FP16 fast path + benchmark & equivalence
 │   ├── data/
 │   │   ├── downloader.py      # Automated COCO filtering & streaming downloader
 │   │   ├── dataset.py         # PyTorch Dataset implementation
 │   │   ├── augmentations.py   # Albumentations pipeline (Spatial + BBox transforms)
-│   │   └── mosaic.py          # 4-image Mosaic and Mixup data augmentation
+│   │   ├── mosaic.py          # 4-image Mosaic and Mixup data augmentation
+│   │   └── clips.py           # Demo clip resolver (Drive / YouTube / synthetic)
 │   ├── models/
 │   │   ├── backbone.py        # Custom ResNet-style CNN feature extractor (P3, P4, P5)
 │   │   ├── neck.py            # Feature Pyramid Network (FPN) — top-down feature fusion
@@ -46,7 +122,7 @@ DeepMeow/
 │   │   ├── metrics.py         # COCO-style mAP evaluation (mAP@50 & mAP@50:95)
 │   │   ├── ema.py             # ModelEMA (Exponential Moving Average) weight smoothing
 │   │   └── kmeans_anchors.py  # 1-IoU K-Means anchor clustering for custom datasets
-│   └── tracking/              # Multi-object tracking engine (Week 5)
+│   └── tracking/              # Multi-object tracking engine
 │       ├── kalman_filter.py   # 8-D constant-velocity Kalman filter + Mahalanobis gating
 │       ├── hungarian.py       # From-scratch O(n²m) Hungarian assignment algorithm
 │       ├── sort.py            # SORT: Kalman predict → IoU cost → Hungarian → lifecycle
@@ -60,8 +136,6 @@ DeepMeow/
 ---
 
 ## 6-Week Development Roadmap
-
-We are following a 6-week research build schedule:
 
 - [x] **Week 1: Data Pipeline & Custom CNN Backbone**
   - Configured project directory structure & YAML hyperparameter definitions
@@ -97,10 +171,11 @@ We are following a 6-week research build schedule:
   - Sanity tests: constant-velocity trajectory recovery through detector dropouts, crossing-cats identity preservation under shuffled detection order, gallery budget trimming
   - Added `src/tracking/demo.py`: end-to-end video pipeline rendering boxes, persistent IDs, confidence labels and motion trails
 
-- [ ] **Week 6: Inference Pipeline, Profiling & Portfolio Documentation**
-  - Building real-time video processing pipeline with visual track histories
-  - Benchmarking FPS performance and memory footprint
-  - Writing final technical project report and ablation summary
+- [x] **Week 6: Inference Pipeline, Profiling & Portfolio Documentation**
+  - Wrapped detector + tracker into a reusable `CatDetectorTracker` (`src/inference.py`) with streaming `step()` API, live confidence slider and per-video summary stats
+  - Built the optimized fast path (`src/optimize.py`): TorchScript trace + FP16 + cached anchors + fused decode — **2.2× speedup (27.7 → 62.0 FPS)** with bit-identical fp32 boxes
+  - Benchmarked FPS end-to-end and profiled the fast path (cuDNN convolutions dominate)
+  - Portfolio documentation with reproduced results (this README)
 
 ---
 
@@ -136,7 +211,7 @@ Total predictions per image: 52x52x3 + 26x26x3 + 13x13x3 = **10,647 anchors**
 
 ---
 
-## Tracking Engine Overview (Week 5)
+## Tracking Engine Overview
 
 Detections are streamed into a multi-object tracker that maintains persistent cat identities across frames:
 
@@ -188,11 +263,12 @@ To replicate our experiments without setting up a local GPU environment:
 1. Click the **Open in Colab** badge at the top of this page.
 2. Ensure GPU acceleration is enabled (`Runtime -> Change runtime type -> T4 GPU`).
 3. Execute the cells in `notebooks/DeepMeow_Colab.ipynb` sequentially:
-   - **Cells 1–8**: Week 1 (environment setup, dataset download, backbone test)
-   - **Cells 9–15**: Week 2 (FPN, head, loss, and full detector verification)
-   - **Cells 16–22**: Week 3 (mAP evaluation, mosaic augmentation, and baseline training)
-   - **Cells 23–28**: Week 4 (K-means anchors, EMA verification, multi-session training, debug checklist)
-   - *Week 5 tracking notebook cells: coming soon*
+   - **§1–8**: environment setup, dataset download, backbone verification
+   - **§9–15**: FPN, head, loss, and full detector verification
+   - **§16–22**: mAP evaluator, mosaic augmentation, training & inference grid
+   - **§23–28**: K-Means anchors, EMA verification, multi-session training, debug checklist
+   - **§30–35**: Kalman / Hungarian / SORT / DeepSORT verification + tracked video demo
+   - **§36–37**: reusable inference pipeline, FP16/TorchScript optimization & benchmarks
 
 If you prefer running locally:
 ```bash
@@ -202,7 +278,7 @@ pip install -r requirements.txt
 python src/data/downloader.py
 ```
 
-### Verifying the Tracking Engine (Week 5)
+### Verifying the Tracking Engine
 
 Each tracking module ships with a standalone sanity-test block that runs without any data or GPU:
 
@@ -221,3 +297,24 @@ python src/tracking/demo.py \
     --checkpoint checkpoints/best.pth \
     --out results/tracked_demo.mp4
 ```
+
+Or use the reusable pipeline programmatically:
+
+```python
+from src.inference import CatDetectorTracker
+
+pipeline = CatDetectorTracker(checkpoint="checkpoints/best.pt", conf_threshold=0.25)
+summary = pipeline.run_video("cats.mp4", "tracked.mp4")   # {'frames':…, 'fps':…, 'peak_tracks':…}
+
+outputs, canvas = pipeline.step(frame)   # streaming / webcam use
+pipeline.conf_threshold = 0.40           # live "slider", no rebuild needed
+```
+
+---
+
+## ⚠️ Limitations
+
+- **mAP@50 ≈ 0.59** — solid for a from-scratch model on 3k images, but below modern pre-trained detectors; the biggest wins left on the table are backbone pre-training, larger input resolution and more data.
+- **Low-confidence misses** — heavily occluded cats in dark scenes can fall under the 0.3 confidence threshold (see the 6-image grid above).
+- **Appearance embeddings are trained from scratch** on detection crops only; a metric-learned Re-ID embedding would further harden identity preservation.
+- Single class (`cat`) by design; extending to multi-class requires only head/config changes.
