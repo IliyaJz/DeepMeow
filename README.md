@@ -8,7 +8,7 @@ A research-focused computer vision implementation in PyTorch. The goal of this p
 
 ---
 
-## 🎬 Demo — Tracked Video
+## Demo — Tracked Video
 
 End-to-end pipeline (detector → DeepSORT tracker → renderer) running on a real 219-frame 1280×736 cat clip, with persistent track IDs, confidence labels and motion trails. Click the preview to watch the full-quality MP4.
 
@@ -18,7 +18,7 @@ End-to-end pipeline (detector → DeepSORT tracker → renderer) running on a re
 
 ---
 
-## 🐱 Qualitative Detection Results
+## Qualitative Detection Results
 
 Inference on 6 random validation images (confidence threshold 0.3, NMS IoU 0.45) using the epoch-200 checkpoint:
 
@@ -39,7 +39,7 @@ We focus on single-class detection and tracking ("cat") using annotated images f
 
 ---
 
-## 📊 Results & Evaluation
+## Results & Evaluation
 
 ### Detection accuracy (COCO-style mAP)
 
@@ -312,7 +312,7 @@ pipeline.conf_threshold = 0.40           # live "slider", no rebuild needed
 
 ---
 
-## ⚠️ Limitations
+## Limitations
 
 - **mAP@50 ≈ 0.59** — solid for a from-scratch model on 3k images, but below modern pre-trained detectors; the biggest wins left on the table are backbone pre-training, larger input resolution and more data.
 - **Low-confidence misses** — heavily occluded cats in dark scenes can fall under the 0.3 confidence threshold (see the 6-image grid above).
